@@ -1,3 +1,14 @@
+// Header Files
+// You included a lot of headers:
+// Networking:
+// <arpa/inet.h>, <netdb.h>, <unistd.h> → needed for sockets (send/recv, IP handling).
+// Multithreading & sync:
+// <thread>, <mutex>, <semaphore.h>, <atomic> → handle multiple clients at the same time safely.
+// Utilities:
+// <chrono> (time), <sstream> (string processing), <vector>, <unordered_map>, <list> (for cache).
+// I/O:
+// <iostream> for printing logs.
+
 #include <arpa/inet.h>
 #include <chrono>
 #include <csignal>
