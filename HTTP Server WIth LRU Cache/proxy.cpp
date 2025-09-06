@@ -26,16 +26,25 @@
 #include <atomic>
 #include <unistd.h>
 
-#define PORT 8081
-#define BUFFER_SIZE 8192
-#define CACHE_TTL 60 // seconds
-#define MAX_CONCURRENT_CLIENTS 10
+#define PORT 8081 // proxy listens on port 8081.
+#define BUFFER_SIZE 8192 // max data chunk size (8 KB).
+#define CACHE_TTL 60 // cache validity = 60 seconds.
+#define MAX_CONCURRENT_CLIENTS 10 // only allow 10 clients at a time.
 
 // ---------------- Globals ----------------
+// Semaphore → controls how many clients can connect at the same time (like a ticket system).
+// Atomic counter → keeps track of number of currently connected clients in a thread-safe way.
 sem_t clientSemaphore;
 std::atomic<int> activeClients{0};
 
 // ---------------- Logger ----------------
+// Logger Class
+// This is a helper for printing logs from multiple threads without mixing them up:
+// It has levels: Info, Debug, Error.
+// log() locks a mutex so only one thread prints at a time.
+// Convenience functions → info(), debug(), error().
+// ✅ Example: If 2 clients print logs at the same time, without the mutex the output could get jumbled. This prevents that.
+
 class Logger
 {
 public:
@@ -67,6 +76,35 @@ private:
 Logger logger;
 
 // ---------------- LRU Cache ----------------
+// This is for caching web responses so repeated requests are faster:
+// Node = small structure storing:
+// key → usually the URL.
+// value → the response body.
+// expiry → when this cache entry becomes invalid (after TTL).
+// capacity → how many items cache can hold.
+// items → doubly-linked list (std::list) to maintain order (LRU = least recently used).
+// map → fast lookup table from key → pointer to node in the list.
+// mtx → protects cache from race conditions when multiple threads use it.
+// ttl → how long data stays valid.
+
+
+// proxy server will often fetch the same webpage multiple times.
+// Instead of going to the internet every time, it stores the response in memory.
+// Next time the same page is requested → serve directly from cache (faster).
+// It uses LRU (Least Recently Used) policy → if cache is full, remove the oldest unused entry.
+
+// 1. Node
+// Each cache entry stores:
+// key → usually the URL of the request.
+// value → the page content (response from server).
+// expiry → a time limit (so stale data doesn’t get reused).
+
+// 2. Data Structures
+// items (list) → Keeps nodes in recently used order.
+// Most recently used → at the front.
+// Least recently used → at the back.
+// map (unordered_map) → Fast lookup: URL → iterator to.
+// mtx (mutex) → Protects cache operations since multiple threads (clients) might read/write at the same time.
 class LRUCache
 {
     struct Node
@@ -117,11 +155,19 @@ public:
     //     value = node.value;
     //     logger.debug("[CACHE] Cache hit for key: " + key);
 
-    //     logger.debug("[CACHE] Mutex RELEASED for find()");
+    //     logger.debug("[CACHE] MuteX RELEASED for find()");
     //     mtx.unlock();
     //     return true;
     // }
 
+
+
+// find(key, value)
+// Tries to find the page in cache.
+// If not found → MISS (returns false).
+// If found but expired → delete it, MISS.
+// If found & valid → HIT (copy value, move entry to front because it’s most recently used).
+//  This makes sure fresh items stay in cache longer.
 bool find(const std::string &key, std::string &value)
 {
     // Log and acquire lock manually to show acquire/release in terminal
@@ -163,7 +209,13 @@ bool find(const std::string &key, std::string &value)
     return true;
 }
 
-    // -------- Put (Insert/Update cache entry) --------
+// -------- Put (Insert/Update cache entry) --------
+// put(key, value)
+// Adds/updates an entry in cache.
+// If entry already exists → update it + refresh expiry + move to front.
+// If cache is full → evict the least recently used entry (items.back()).
+// Insert the new entry at the front.
+// This ensures the cache doesn’t grow too large.
 bool put(const std::string &key, const std::string &value)
 {
     logger.debug("[CACHE] Attempting to acquire cache mutex for put()");
@@ -209,8 +261,14 @@ bool put(const std::string &key, const std::string &value)
     return true;
 }
 
+// create(key, value)
+// Similar to put, but explicitly:
+// Deletes old entry if exists.
+// Evicts last if cache full.
+// Inserts new one at front with new expiry.
+// Difference: create always overwrites if key exists, while put updates if found.
 
-    void create(const std::string &key, const std::string &value)
+void create(const std::string &key, const std::string &value)
     {
         logger.debug("[CACHE] Attempting to acquire cache mutex for create()");
         mtx.lock();
@@ -241,7 +299,12 @@ bool put(const std::string &key, const std::string &value)
         mtx.unlock();
     }
 
-    void erase(const std::string &key)
+
+// erase(key)
+// Removes a key manually if it exists.
+// Useful if server says the cached page is invalid (e.g., forced refresh).
+
+void erase(const std::string &key)
     {
         logger.debug("[CACHE] Attempting to acquire cache mutex for erase()");
         mtx.lock();
@@ -263,6 +326,26 @@ bool put(const std::string &key, const std::string &value)
 LRUCache cache(100, CACHE_TTL);
 
 // ---------------- Utilities ----------------
+// receiveData(int sock)
+// This function reads data from a socket until there’s no more data left.
+// Think of a socket as a pipe between your proxy and the client/server.
+// Steps:
+// char buffer[BUFFER_SIZE];
+// → Temporary storage (8 KB at a time).
+// std::ostringstream response;
+// → We’ll keep appending data here to form one complete string.
+// recv(sock, buffer, BUFFER_SIZE, 0)
+// Reads bytes from the socket into buffer.
+// Returns how many bytes were read (bytesRead).
+// Returns 0 if the other side closed the connection.
+// while ((bytesRead = recv(...)) > 0)
+// Keep reading until there’s nothing left.
+// Each chunk is written to response.
+// Logging shows how many bytes were received each time.
+// When done → return the whole message as a std::string.
+// ✅ In practice:
+// If reading from browser → this will capture the full HTTP request.
+// If reading from server → this will capture the full HTTP response.
 std::string receiveData(int sock)
 {
     char buffer[BUFFER_SIZE];
@@ -279,7 +362,18 @@ std::string receiveData(int sock)
     logger.debug("Finished receiving data from socket.");
     return response.str();
 }
-
+parseRequestLine(const std::string &requestLine, …)
+// This is a simple HTTP parser for the first line of a request.
+// Example HTTP request:
+// GET http://example.com/index.html HTTP/1.1
+// Steps:
+// std::istringstream iss(requestLine);
+// → Split the string into words.
+// iss >> method >> url >> version
+// method = "GET"
+// url = "http://example.com/index.html"
+// version = "HTTP/1.1"
+// If parsing works → return true. Otherwise → false.
 bool parseRequestLine(const std::string &requestLine, std::string &method, std::string &url, std::string &version)
 {
     std::istringstream iss(requestLine);
@@ -289,6 +383,20 @@ bool parseRequestLine(const std::string &requestLine, std::string &method, std::
 }
 
 // ---------------- Tunnel helpers ----------------
+// It creates a data pipe between two sockets.
+// fromSock → the socket you’re reading from (e.g., client → proxy).
+// toSock → the socket you’re writing to (e.g., proxy → destination server).
+// direction → just for logging ("client→server" or "server→client").
+// Whats its used for?
+// Normal HTTP proxying:
+// When your proxy fetches data from a server and needs to stream it back to the client.
+// HTTPS tunneling (CONNECT method):
+// Browser says:
+// CONNECT www.google.com:443 HTTP/1.1
+// → Proxy must act like a bridge, just forwarding raw encrypted data both ways.
+// tunnelAndLog is exactly what enables that.
+// 👉 Essentially, this function keeps reading from one side and forwarding everything to the other side until the connection closes.
+
 void tunnelAndLog(int fromSock, int toSock, const std::string &direction)
 {
     char buf[BUFFER_SIZE];
@@ -306,6 +414,13 @@ void tunnelAndLog(int fromSock, int toSock, const std::string &direction)
 }
 
 // ---------------- Client Handler ----------------
+// This function is called whenever a new client (like a browser) connects.
+// Manages concurrency with semaphores.
+// Parses request (method, URL, version).
+// If CONNECT (HTTPS) → create a tunnel.
+// If HTTP (GET/POST/etc.) → check cache → else forward request → cache response → send back.
+// Logs everything for debugging.
+
 void handleClient(int clientSock)
 {
     // Get client IP for logs
@@ -358,6 +473,16 @@ void handleClient(int clientSock)
     logger.info("Request from " + std::string(client_ip) + ": " + method + " " + url);
 
     // ---------- Handle HTTPS CONNECT ----------
+    //     Extract host + port (www.google.com, 443).
+    // Resolve hostname (gethostbyname).
+    // Connect to target server on port 443.
+    // Reply back to client:
+    // HTTP/1.1 200 Connection Established
+    // Start two threads with tunnelAndLog:
+    // Client → Server
+    // Server → Client
+    // After this, proxy just blindly forwards encrypted data.
+    // No caching possible, since HTTPS is encrypted end-to-end.
     if (method == "CONNECT")
     {
         logger.info("HTTPS CONNECT request for " + url + " from " + std::string(client_ip));
@@ -428,9 +553,34 @@ void handleClient(int clientSock)
         return;
     }
 
-    // ---------- Handle HTTP (GET/POST/etc) ----------
+    // ---------- Handle HTTP (GET/etc) ----------
     // Try cache (URL used as key)
-    std::string cachedResponse;
+    //     For normal HTTP requests:
+
+    // (a) Check Cache
+    // if (cache.find(url, cachedResponse)) {
+    //     send(clientSock, cachedResponse...);
+    // }
+
+    // If cached → send response back immediately.
+    // Saves time & bandwidth.
+    // (b) If Not Cached → Forward Request
+    // Parse Host + Path
+    // Extract host from URL or from Host: header.
+    // Example:
+    // URL: http://example.com/index.html
+    // Host: example.com
+    // Path: /index.html
+    // Connect to Origin Server (port 80).
+    // Rebuild Request
+    // Forward client’s request to server.
+    // Remove proxy-specific headers (Proxy-Connection, Proxy-Authorization).
+    // Add Connection: close.
+    // (c) Get Response from Server
+    // std::string response = receiveData(serverSock);
+    // Reads entire HTTP response (headers + body).
+    //     std::string cachedResponse;
+    
     if (cache.find(url, cachedResponse))
     {
         logger.info("Cache hit for " + url + ". Serving response from cache.");
