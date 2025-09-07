@@ -55,6 +55,8 @@ Runs directly from terminal.
 
 ## How It Works
 
+<img width="1203" height="1474" alt="Simple HTTP Server" src="https://github.com/user-attachments/assets/d56ce417-63d0-43f5-97a4-d230f7358c17" />
+
 1) Client (e.g., browser or curl) sends a request to proxy.
 
 2) Proxy parses request → checks cache (for HTTP).
