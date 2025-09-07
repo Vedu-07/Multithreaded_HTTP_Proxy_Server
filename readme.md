@@ -69,6 +69,10 @@ Runs directly from terminal.
 
 6) For HTTPS → proxy establishes a tunnel and just forwards encrypted traffic.
 
+## Advanced Server (In progress)
+
+### Implement async I/O (e.g., epoll) for higher scalability
+
 ## How to Run
 
 ### Getting Started
