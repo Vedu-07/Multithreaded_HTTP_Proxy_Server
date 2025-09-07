@@ -580,7 +580,7 @@ void handleClient(int clientSock)
     // std::string response = receiveData(serverSock);
     // Reads entire HTTP response (headers + body).
     //     std::string cachedResponse;
-    
+
     if (cache.find(url, cachedResponse))
     {
         logger.info("Cache hit for " + url + ". Serving response from cache.");

@@ -1,6 +1,6 @@
-// epoll_proxy_full_fixed.cpp
-// Fixed full epoll-based HTTP proxy with LRU+TTL cache, Content-Length & chunked handling,
+// Full epoll-based HTTP proxy with LRU+TTL cache, Content-Length & chunked handling,
 // CONNECT (HTTPS) tunneling, semaphore limiting concurrent clients, and improved logging.
+
 
 #include <arpa/inet.h>
 #include <errno.h>
