@@ -362,7 +362,7 @@ std::string receiveData(int sock)
     logger.debug("Finished receiving data from socket.");
     return response.str();
 }
-parseRequestLine(const std::string &requestLine, …)
+// parseRequestLine(const std::string &requestLine, …)
 // This is a simple HTTP parser for the first line of a request.
 // Example HTTP request:
 // GET http://example.com/index.html HTTP/1.1
@@ -579,7 +579,8 @@ void handleClient(int clientSock)
     // (c) Get Response from Server
     // std::string response = receiveData(serverSock);
     // Reads entire HTTP response (headers + body).
-    //     std::string cachedResponse;
+    
+    std::string cachedResponse;
 
     if (cache.find(url, cachedResponse))
     {
