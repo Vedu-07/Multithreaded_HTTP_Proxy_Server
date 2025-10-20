@@ -1,6 +1,3 @@
-// Full epoll-based HTTP proxy with LRU+TTL cache, Content-Length & chunked handling,
-// CONNECT (HTTPS) tunneling, semaphore limiting concurrent clients, and improved logging.
-// event loop systems
 
 #include <arpa/inet.h>
 #include <errno.h>
